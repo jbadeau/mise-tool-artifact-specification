@@ -57,11 +57,11 @@ flowchart LR
     M1["Platform Manifest<br/>mediaType: application/vnd.oci.image.manifest.v1+json<br/>platform.os: linux<br/>platform.architecture: amd64"]
     M2["Platform Manifest<br/>mediaType: application/vnd.oci.image.manifest.v1+json<br/>platform.os: darwin<br/>platform.architecture: arm64"]
 
-    C1["Config Blob<br/>mediaType: application/vnd.mise.tool.config.v1+json<br/><br/>fields:<br/>mtaSpecVersion: 1.0<br/>bin: ['bin/']<br/>env: {JAVA_HOME: install_path}"]
-    C2["Config Blob<br/>mediaType: application/vnd.mise.tool.config.v1+json<br/><br/>fields:<br/>mtaSpecVersion: 1.0<br/>bin: ['bin/']<br/>env: {JAVA_HOME: install_path}"]
+    C1["Config Blob<br/>mediaType: application/vnd.mise.tool.config.v1+json<br/><br/>fields:<br/>mtaSpecVersion: 1.0<br/>stripComponents: 1<br/>bin: ['bin/']<br/>env: {JAVA_HOME: install_path}"]
+    C2["Config Blob<br/>mediaType: application/vnd.mise.tool.config.v1+json<br/><br/>fields:<br/>mtaSpecVersion: 1.0<br/>stripComponents: 1<br/>bin: ['bin/']<br/>env: {JAVA_HOME: install_path}"]
 
-    L1["Payload Layer<br/>mediaType: (per upstream format)<br/><br/>contents:<br/>bin/java, bin/javac, bin/jar, ..."]
-    L2["Payload Layer<br/>mediaType: (per upstream format)<br/><br/>contents:<br/>bin/java, bin/javac, bin/jar, ..."]
+    L1["Payload Layer<br/>mediaType: tar+gzip | tar+zstd | zip | octet-stream<br/><br/>contents:<br/>bin/java, bin/javac, bin/jar, ..."]
+    L2["Payload Layer<br/>mediaType: tar+gzip | tar+zstd | zip | octet-stream<br/><br/>contents:<br/>bin/java, bin/javac, bin/jar, ..."]
 
     R1["Referrer Manifest<br/>artifactType: application/spdx+json"]
     R2["Referrer Manifest<br/>artifactType: application/vnd.in-toto+json"]
