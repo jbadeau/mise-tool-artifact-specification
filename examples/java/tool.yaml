@@ -1,0 +1,33 @@
+tool:
+  name: Azul Zulu JDK
+  version: "17.64.17"
+  description: Azul Zulu OpenJDK distribution
+  url: https://azul.com/zulu
+  documentation: https://docs.azul.com/core/zulu-openjdk
+  source: https://github.com/zulu-openjdk/zulu-openjdk
+  license: GPL-2.0-with-classpath-exception
+  vendor: Azul Systems
+  authors: Azul Systems <support@azul.com>
+
+config:
+  stripComponents: 1
+  bin: [bin/]
+  env:
+    JAVA_HOME: "{{ install_path }}"
+
+platforms:
+  - os: linux
+    arch: amd64
+    asset: https://cdn.azul.com/zulu/bin/zulu17.64.17-ca-jdk17.0.18-linux_x64.tar.gz
+  - os: linux
+    arch: arm64
+    asset: https://cdn.azul.com/zulu/bin/zulu17.64.17-ca-jdk17.0.18-linux_aarch64.tar.gz
+  - os: darwin
+    arch: amd64
+    asset: https://cdn.azul.com/zulu/bin/zulu17.64.17-ca-jdk17.0.18-macosx_x64.tar.gz
+  - os: darwin
+    arch: arm64
+    asset: https://cdn.azul.com/zulu/bin/zulu17.64.17-ca-jdk17.0.18-macosx_aarch64.tar.gz
+  - os: windows
+    arch: amd64
+    asset: https://cdn.azul.com/zulu/bin/zulu17.64.17-ca-jdk17.0.18-win_x64.zip

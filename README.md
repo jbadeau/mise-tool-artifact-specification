@@ -29,7 +29,10 @@ The **Mise Tool Artifact (MTA)** specification defines a standardized, multi-pla
 | Platform Manifest | `application/vnd.oci.image.manifest.v1+json` |
 | Artifact Type | `application/vnd.mise.tool.v1` |
 | Config | `application/vnd.mise.tool.config.v1+json` |
-| Layer | `application/vnd.oci.image.layer.v1.tar+gzip` |
+| Layer (tar+gzip) | `application/vnd.oci.image.layer.v1.tar+gzip` |
+| Layer (tar+zstd) | `application/vnd.oci.image.layer.v1.tar+zstd` |
+| Layer (zip) | `application/zip` |
+| Layer (binary) | `application/octet-stream` |
 
 ## Artifact Layout
 
@@ -39,26 +42,26 @@ A single artifact version MUST be published as one OCI Image Index. That index M
 
 ```
 OCI Image Index
-  ├── platform: linux/amd64   → Manifest → [config, layer.tar.gz]
-  ├── platform: linux/arm64   → Manifest → [config, layer.tar.gz]
-  ├── platform: darwin/amd64  → Manifest → [config, layer.tar.gz]
-  ├── platform: darwin/arm64  → Manifest → [config, layer.tar.gz]
-  └── platform: windows/amd64 → Manifest → [config, layer.tar.gz]
+  ├── platform: linux/amd64   → Manifest → [config, payload]
+  ├── platform: linux/arm64   → Manifest → [config, payload]
+  ├── platform: darwin/amd64  → Manifest → [config, payload]
+  ├── platform: darwin/arm64  → Manifest → [config, payload]
+  └── platform: windows/amd64 → Manifest → [config, payload]
 ```
 
 ```mermaid
 flowchart LR
-    TAG["Tag<br/>registry.example.com/tools/kubectl:1.34.1"]
-    IDX["OCI Image Index<br/>mediaType: application/vnd.oci.image.index.v1+json<br/>artifactType: application/vnd.mise.tool.v1<br/><br/>annotations:<br/>org.opencontainers.image.title: kubectl<br/>org.opencontainers.image.version: 1.34.1<br/>org.opencontainers.image.description: Kubernetes CLI<br/>org.opencontainers.image.url: kubernetes.io<br/>org.opencontainers.image.source: github.com/kubernetes/kubernetes<br/>org.opencontainers.image.licenses: Apache-2.0"]
+    TAG["Tag<br/>registry.example.com/tools/java:17.60.17"]
+    IDX["OCI Image Index<br/>mediaType: application/vnd.oci.image.index.v1+json<br/>artifactType: application/vnd.mise.tool.v1<br/><br/>annotations:<br/>org.opencontainers.image.title: Azul Zulu JDK<br/>org.opencontainers.image.version: 17.60.17<br/>org.opencontainers.image.description: Azul Zulu OpenJDK distribution<br/>org.opencontainers.image.url: azul.com/zulu<br/>org.opencontainers.image.source: github.com/zulu-openjdk/zulu-openjdk<br/>org.opencontainers.image.licenses: GPL-2.0-with-classpath-exception"]
 
     M1["Platform Manifest<br/>mediaType: application/vnd.oci.image.manifest.v1+json<br/>platform.os: linux<br/>platform.architecture: amd64"]
     M2["Platform Manifest<br/>mediaType: application/vnd.oci.image.manifest.v1+json<br/>platform.os: darwin<br/>platform.architecture: arm64"]
 
-    C1["Config Blob<br/>mediaType: application/vnd.mise.tool.config.v1+json<br/><br/>fields:<br/>mtaSpecVersion: 1.0<br/>bin: ['kubectl']<br/>env: {}"]
-    C2["Config Blob<br/>mediaType: application/vnd.mise.tool.config.v1+json<br/><br/>fields:<br/>mtaSpecVersion: 1.0<br/>bin: ['kubectl']<br/>env: {}"]
+    C1["Config Blob<br/>mediaType: application/vnd.mise.tool.config.v1+json<br/><br/>fields:<br/>mtaSpecVersion: 1.0<br/>bin: ['bin/']<br/>env: {JAVA_HOME: install_path}"]
+    C2["Config Blob<br/>mediaType: application/vnd.mise.tool.config.v1+json<br/><br/>fields:<br/>mtaSpecVersion: 1.0<br/>bin: ['bin/']<br/>env: {JAVA_HOME: install_path}"]
 
-    L1["Payload Layer<br/>mediaType: application/vnd.oci.image.layer.v1.tar+gzip<br/><br/>archive contents:<br/>kubectl"]
-    L2["Payload Layer<br/>mediaType: application/vnd.oci.image.layer.v1.tar+gzip<br/><br/>archive contents:<br/>kubectl"]
+    L1["Payload Layer<br/>mediaType: (per upstream format)<br/><br/>contents:<br/>bin/java, bin/javac, bin/jar, ..."]
+    L2["Payload Layer<br/>mediaType: (per upstream format)<br/><br/>contents:<br/>bin/java, bin/javac, bin/jar, ..."]
 
     R1["Referrer Manifest<br/>artifactType: application/spdx+json"]
     R2["Referrer Manifest<br/>artifactType: application/vnd.in-toto+json"]
@@ -185,19 +188,30 @@ If multiple platform manifests reference byte-identical config blobs, registries
 
 ### Payload Layer Semantics
 
-The payload layer MUST be a gzip-compressed tar archive using the standard OCI layer media type `application/vnd.oci.image.layer.v1.tar+gzip`.
+The payload layer contains the original upstream asset for the target platform, pushed to the registry without modification. Publishers MUST NOT repackage or transform the original asset. This preserves upstream checksums and signatures.
 
-For installation, clients MUST treat the layer as a regular archive payload, not as a container root filesystem diff. To keep behavior deterministic across clients, publishers and clients MUST follow these rules:
+The layer's media type MUST reflect the actual format of the payload:
+
+| Format | Media Type |
+|--------|------------|
+| gzip-compressed tar | `application/vnd.oci.image.layer.v1.tar+gzip` |
+| zstd-compressed tar | `application/vnd.oci.image.layer.v1.tar+zstd` |
+| zip archive | `application/zip` |
+| standalone binary | `application/octet-stream` |
+
+Clients MUST inspect the layer media type (or detect the format from file signatures) to determine the extraction method. For archive payloads, clients MUST follow these rules:
 
 - The archive MUST unpack into a fresh installation directory chosen by the client.
-- Archive entry paths MUST be relative, normalized POSIX-style paths as stored in the tar archive.
+- Archive entry paths MUST be relative, normalized POSIX-style paths as stored in the archive.
 - Archive entries MUST NOT use absolute paths or contain `..` path traversal segments.
 - Archive entries MUST NOT use OCI whiteout semantics.
 - Archive entries MUST NOT include device nodes.
 - Symbolic links MAY be used. Clients SHOULD preserve them when the host platform supports them.
-- Clients MUST NOT strip a leading directory automatically. Paths are interpreted exactly as stored in the archive.
+- Clients MUST NOT strip leading directories unless `stripComponents` is set in the config object.
 
-This keeps the payload OCI-native at the transport layer while avoiding container-specific filesystem semantics that do not map cleanly to installer behavior.
+For standalone binary payloads (`application/octet-stream`), clients MUST place the binary at the path specified by the first `bin` entry in the config object and make it executable.
+
+This keeps the payload OCI-native at the transport layer while preserving the original upstream artifact exactly as distributed.
 
 ### Config Object (`application/vnd.mise.tool.config.v1+json`)
 
@@ -208,10 +222,9 @@ Clients MUST ignore unknown fields in the config object.
 ```json
 {
   "mtaSpecVersion": "1.0",
+  "stripComponents": 1,
   "bin": [
-    "bin/java",
-    "bin/javac",
-    "bin/jar"
+    "bin/"
   ],
   "env": {
     "JAVA_HOME": "{{ install_path }}",
@@ -225,7 +238,8 @@ Clients MUST ignore unknown fields in the config object.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `mtaSpecVersion` | string | yes | Spec version (e.g. `"1.0"`) |
-| `bin` | string[] | yes | Relative POSIX-style paths to executables within the installation directory after extraction |
+| `stripComponents` | integer | no | Number of leading directory components to strip when extracting archive payloads. Defaults to `0`. Does not apply to standalone binary payloads. |
+| `bin` | string[] | yes | Relative POSIX-style paths to executables or directories within the installation directory after extraction. Entries ending with `/` denote directories; clients MUST expose all executable files within that directory. Entries without a trailing `/` denote individual files. |
 | `env` | object | no | Environment variables to set using the templating variables defined below |
 
 #### Config Templating
@@ -259,7 +273,7 @@ OCI pre-defined annotations SHOULD be used wherever their semantics match the ar
 | `org.opencontainers.image.authors` | recommended | Contact details of maintainers |
 | `org.opencontainers.image.created` | recommended | Build timestamp (RFC 3339) |
 
-Clients SHOULD treat the OCI reference as the canonical package identity. In practice, this means the repository identifies the tool and the tag identifies the version, for example `registry.example.com/tools/kubectl:1.34.1`. Clients MAY additionally resolve and record the digest for reproducibility.
+Clients SHOULD treat the OCI reference as the canonical package identity. In practice, this means the repository identifies the tool and the tag identifies the version, for example `registry.example.com/tools/java:17.60.17`. Clients MAY additionally resolve and record the digest for reproducibility.
 
 ## Platform Resolution
 
@@ -274,7 +288,7 @@ Platform selection follows the standard OCI Image Index resolution. Clients matc
 
 These are standard OCI platform descriptor fields per the [OCI Image Index specification](https://github.com/opencontainers/image-spec/blob/main/image-index.md).
 
-Because the config blob is platform-specific, `bin` entries MUST name the executable as it exists in that platform payload. For example, a Windows manifest SHOULD list `kubectl.exe`, while a Linux or macOS manifest SHOULD list `kubectl`. Clients MUST NOT append platform-specific executable suffixes automatically.
+Because the config blob is platform-specific, `bin` entries MUST name the executable as it exists in that platform payload. For example, a Windows manifest SHOULD list `bin/java.exe` or `bin\\`, while a Linux or macOS manifest SHOULD list `bin/java` or `bin/`. Clients MUST NOT append platform-specific executable suffixes automatically.
 
 If multiple manifests match, clients SHOULD prefer the most specific match, for example a matching `variant` over an entry that omits it.
 
@@ -284,30 +298,12 @@ After selecting a platform manifest, clients SHOULD:
 
 1. Download and verify the selected manifest, config, and payload layer descriptors.
 2. Extract the payload into a newly created installation directory.
-3. Resolve `bin` entries relative to that installation directory exactly as listed.
+3. Resolve `bin` entries relative to that installation directory:
+   - Entries ending with `/` are directories. Clients MUST discover and expose all executable files directly within that directory (non-recursive).
+   - All other entries are individual file paths. Clients MUST expose them exactly as listed.
 4. Apply `env` templating using host-specific path normalization.
 
 Clients MUST fail installation if any `bin` entry resolves outside the installation directory or does not exist after extraction.
-
-## ORAS Interoperability
-
-MTA is designed to work well with [ORAS](https://oras.land/) for publishing, discovery, and pulling.
-
-- Publishers SHOULD tag the top-level OCI Image Index for each released version.
-- Clients SHOULD resolve the platform from the tagged index, then fetch the selected manifest, config, and payload blobs.
-- Installation MUST NOT depend on the Referrers API. A client using `oras` SHOULD be able to install an artifact using only standard manifest and blob retrieval.
-- Signatures, SBOMs, and provenance SHOULD be treated as optional verification data layered on top of the core install flow.
-
-In practice, an MTA client built on `oras` is expected to:
-
-1. Resolve a reference such as `<registry>/<repo>/<tool>:<version>` to an OCI Image Index.
-2. Select the best matching manifest from `manifests[]` using the host platform.
-3. Fetch the selected manifest, config blob, and payload layer.
-4. Extract and install according to the rules in this specification.
-
-This keeps the install path compatible with registries and clients that support OCI artifacts and image indexes, even when newer registry features such as referrers are unavailable.
-
-Clients that need to discover available versions MAY use the standard registry tags API, for example `GET /v2/<name>/tags/list`, and treat tags as candidate artifact versions.
 
 ## Security Attestations
 

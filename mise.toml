@@ -1,0 +1,110 @@
+[tools]
+oras = "1.3.1"
+yq = "4.45.4"
+jq = "1.7.1"
+
+[tasks.dev]
+description = "Start Nexus and provision the OCI registry"
+depends = ["nexus:start", "nexus:provision"]
+
+[tasks."nexus:start"]
+description = "Start Nexus container"
+run = "docker compose -f examples/docker-compose.yml up -d"
+
+[tasks."nexus:provision"]
+description = "Wait for Nexus and create the OCI registry"
+depends = ["nexus:start"]
+run = """
+NEXUS_URL="http://localhost:8081"
+
+echo "Waiting for Nexus to start..."
+until curl -sf "$NEXUS_URL/service/rest/v1/status/writable" > /dev/null 2>&1; do
+  sleep 5
+  printf "."
+done
+echo " ready"
+
+# Read the auto-generated admin password
+ADMIN_PASSWORD=$(docker compose -f examples/docker-compose.yml exec -T nexus cat /nexus-data/admin.password 2>/dev/null || true)
+if [ -z "$ADMIN_PASSWORD" ]; then
+  echo "Admin password already consumed. Using default: admin123"
+  ADMIN_PASSWORD="admin123"
+fi
+
+echo "Admin password: $ADMIN_PASSWORD"
+
+# Accept EULA
+DISCLAIMER=$(curl -sf -u "admin:$ADMIN_PASSWORD" "$NEXUS_URL/service/rest/v1/system/eula" | jq -r '.disclaimer')
+jq -n --arg d "$DISCLAIMER" '{"accepted": true, "disclaimer": $d}' | \
+  curl -sf -u "admin:$ADMIN_PASSWORD" -X POST "$NEXUS_URL/service/rest/v1/system/eula" \
+    -H "Content-Type: application/json" -d @- || true
+
+# Enable anonymous access for pulls
+curl -sf -u "admin:$ADMIN_PASSWORD" -X PUT "$NEXUS_URL/service/rest/v1/security/anonymous" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true, "userId": "anonymous", "realmId": "NexusAuthorizingRealm"}' || true
+
+# Enable Docker Bearer Token realm
+curl -sf -u "admin:$ADMIN_PASSWORD" -X PUT "$NEXUS_URL/service/rest/v1/security/realms/active" \
+  -H "Content-Type: application/json" \
+  -d '["NexusAuthenticatingRealm","DockerToken"]' || true
+
+# Create Docker hosted repository on port 5000
+echo "Creating OCI registry (docker-hosted on port 5000)..."
+curl -sf -u "admin:$ADMIN_PASSWORD" -X POST "$NEXUS_URL/service/rest/v1/repositories/docker/hosted" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "oci-registry",
+    "online": true,
+    "storage": {
+      "blobStoreName": "default",
+      "strictContentTypeValidation": false,
+      "writePolicy": "ALLOW"
+    },
+    "docker": {
+      "v1Enabled": false,
+      "forceBasicAuth": false,
+      "httpPort": 5000
+    }
+  }' && echo " created" || echo " already exists"
+
+# Change admin password to admin123 if still using the generated one
+if docker compose -f examples/docker-compose.yml exec -T nexus test -f /nexus-data/admin.password 2>/dev/null; then
+  echo "Setting admin password to admin123..."
+  curl -sf -u "admin:$ADMIN_PASSWORD" -X PUT "$NEXUS_URL/service/rest/v1/security/users/admin/change-password" \
+    -H "Content-Type: text/plain" \
+    -d "admin123"
+fi
+
+echo "Done. OCI registry available at localhost:5000"
+echo "Nexus UI available at $NEXUS_URL (admin / admin123)"
+"""
+
+[tasks."nexus:stop"]
+description = "Stop Nexus repository manager"
+run = "docker compose -f examples/docker-compose.yml down"
+
+[tasks.nuke]
+description = "Stop Nexus and remove all data"
+run = "docker compose -f examples/docker-compose.yml down -v"
+
+[tasks."nexus:logs"]
+description = "Tail Nexus logs"
+run = "docker compose -f examples/docker-compose.yml logs -f"
+
+[tasks.catalog]
+description = "List repositories in Nexus OCI registry"
+run = "oras repo ls --insecure localhost:5000"
+
+[tasks."oras:login"]
+description = "Login to the OCI registry"
+run = 'echo "admin123" | oras login --insecure localhost:5000 -u admin --password-stdin'
+
+[tasks.publish]
+description = "Publish all tool artifacts to the registry"
+depends = ["oras:login", "publish:java"]
+
+[tasks."publish:java"]
+description = "Publish Java tool artifact to the registry"
+depends = ["oras:login"]
+run = "examples/publish.sh examples/java/tool.yaml localhost:5000"

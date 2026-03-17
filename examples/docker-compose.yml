@@ -1,0 +1,13 @@
+services:
+  nexus:
+    image: sonatype/nexus3
+    ports:
+      - "8081:8081"
+      - "5000:5000"
+    volumes:
+      - nexus-data:/nexus-data
+    environment:
+      INSTALL4J_ADD_VM_PARAMS: "-Xms512m -Xmx1024m -XX:MaxDirectMemorySize=1024m"
+
+volumes:
+  nexus-data: {}
