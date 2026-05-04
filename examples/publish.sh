@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TOOL_YAML="${1:?Usage: publish.sh <tool.yaml> [registry]}"
+TOOL_YAML="${1:?Usage: publish.sh <tool.yaml> [registry] [--insecure]}"
 REGISTRY="${2:-localhost:5000}"
+
+ORAS_FLAGS=""
+for arg in "${@:3}"; do
+  case "$arg" in
+    --insecure) ORAS_FLAGS="$ORAS_FLAGS --insecure" ;;
+  esac
+done
 
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -39,8 +46,16 @@ for i in $(seq 0 $((platform_count - 1))); do
   platform_dir="$WORK_DIR/${os}-${arch}"
   mkdir -p "$platform_dir"
 
-  echo "==> [${os}/${arch}] Downloading asset..."
-  curl -sSL -o "$platform_dir/asset" "$asset"
+  # Resolve asset path relative to tool.yaml directory if not a URL
+  if [[ "$asset" =~ ^https?:// ]]; then
+    echo "==> [${os}/${arch}] Downloading asset..."
+    curl -sSL -o "$platform_dir/asset" "$asset"
+  else
+    tool_dir=$(dirname "$(realpath "$TOOL_YAML")")
+    local_path="$tool_dir/$asset"
+    echo "==> [${os}/${arch}] Copying local asset: $local_path"
+    cp "$local_path" "$platform_dir/asset"
+  fi
 
   layer="$platform_dir/asset"
 
@@ -59,13 +74,14 @@ for i in $(seq 0 $((platform_count - 1))); do
   platform_ref="${REGISTRY}/tools/${repo}:${platform_tag}"
 
   echo "==> [${os}/${arch}] Pushing manifest (${layer_media_type})..."
-  oras push --insecure --disable-path-validation "$platform_ref" \
-    --config "$config_file:application/vnd.mise.tool.config.v1+json" \
-    --artifact-type "application/vnd.mise.tool.v1" \
-    "${layer}:${layer_media_type}"
+  ( cd "$platform_dir" && \
+    oras push $ORAS_FLAGS --disable-path-validation "$platform_ref" \
+      --config "$config_file:application/vnd.mise.tool.config.v1+json" \
+      --artifact-type "application/vnd.mise.tool.v1" \
+      "asset:${layer_media_type}" )
 
   # Capture the pushed manifest descriptor
-  descriptor=$(oras manifest fetch --insecure "$platform_ref" --descriptor)
+  descriptor=$(oras manifest fetch $ORAS_FLAGS "$platform_ref" --descriptor)
   digest=$(echo "$descriptor" | jq -r '.digest')
   size=$(echo "$descriptor" | jq -r '.size')
 
@@ -122,7 +138,7 @@ jq -n \
   }' > "$index_file"
 
 echo "==> Pushing image index..."
-oras manifest push --insecure "$ref" "$index_file" \
+oras manifest push $ORAS_FLAGS "$ref" "$index_file" \
   --media-type "application/vnd.oci.image.index.v1+json"
 
 echo "==> Published ${ref}"
